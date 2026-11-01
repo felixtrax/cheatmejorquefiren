@@ -5,27 +5,14 @@ local UserInputService = game:GetService("UserInputService")
 
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
-local npcFolder = Workspace:WaitForChild("NPCs")
 
 local TINY5_DUO = Font.new("rbxasset://fonts/families/Tiny5.json")
 
--- Opciones de funciones
 local settings = {
     panel = true,
     highlights = true,
     nameplates = true,
-    npcCamera = true,
 }
-
-local function setEnabled(instance, enabled)
-    if instance then
-        if instance:IsA("Highlight") then
-            instance.Enabled = enabled
-        else
-            instance.Enabled = enabled
-        end
-    end
-end
 
 -- Interfaz
 local gui = Instance.new("ScreenGui")
@@ -100,8 +87,8 @@ details.Parent = panel
 
 -- Menú de opciones
 local menu = Instance.new("Frame")
-menu.Size = UDim2.fromOffset(220, 190)
-menu.Position = UDim2.new(0, 20, 0.5, -95)
+menu.Size = UDim2.fromOffset(220, 160)
+menu.Position = UDim2.new(0, 20, 0.5, -80)
 menu.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
 menu.BorderSizePixel = 0
 menu.Visible = false
@@ -132,7 +119,11 @@ local function makeToggle(label, key, y)
     button.Parent = menu
 
     local function refresh()
-        button.Text = string.format("%s: %s", label, settings[key] and "ON" or "OFF")
+        button.Text = string.format(
+            "%s: %s",
+            label,
+            settings[key] and "ON" or "OFF"
+        )
         button.BackgroundColor3 = settings[key]
             and Color3.fromRGB(30, 120, 65)
             or Color3.fromRGB(100, 45, 45)
@@ -149,38 +140,10 @@ end
 makeToggle("Panel", "panel", 40)
 makeToggle("Resaltados", "highlights", 75)
 makeToggle("Etiquetas", "nameplates", 110)
-makeToggle("Cámara NPC (T)", "npcCamera", 145)
-
--- Teclas M para mostrar/ocultar menú, T para activar seguimiento mientras se mantiene
-local holdingT = false
-local savedCameraType
-local savedCameraSubject
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-
-    if input.KeyCode == Enum.KeyCode.M then
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.M then
         menu.Visible = not menu.Visible
-    elseif input.KeyCode == Enum.KeyCode.T and settings.npcCamera then
-        holdingT = true
-    end
-end)
-
-local function restoreCamera()
-    local camera = Workspace.CurrentCamera
-    if camera and savedCameraType then
-        camera.CameraType = savedCameraType
-        camera.CameraSubject = savedCameraSubject
-    end
-
-    savedCameraType = nil
-    savedCameraSubject = nil
-end
-
-UserInputService.InputEnded:Connect(function(input)
-    if input.KeyCode == Enum.KeyCode.T then
-        holdingT = false
-        restoreCamera()
     end
 end)
 
@@ -198,10 +161,13 @@ local highlights = {}
 local nameplates = {}
 
 local function addPlayerVisuals(player, character)
-    if player == localPlayer or not character then return end
+    if player == localPlayer or not character then
+        return
+    end
 
-    if not highlights[player] then
-        highlights[player] = create("Highlight", {
+    local highlight = highlights[player]
+    if not highlight then
+        highlight = create("Highlight", {
             Name = "RedWhiteHighlight",
             FillColor = Color3.fromRGB(255, 0, 0),
             OutlineColor = Color3.new(1, 1, 1),
@@ -211,8 +177,9 @@ local function addPlayerVisuals(player, character)
             Enabled = settings.highlights,
             Adornee = character,
         }, gui)
+        highlights[player] = highlight
     else
-        highlights[player].Adornee = character
+        highlight.Adornee = character
     end
 
     local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -220,7 +187,9 @@ local function addPlayerVisuals(player, character)
     local head = character:FindFirstChild("Head")
         or character:WaitForChild("Head", 5)
 
-    if not humanoid or not head then return end
+    if not humanoid or not head then
+        return
+    end
 
     if nameplates[player] then
         nameplates[player]:Destroy()
@@ -266,7 +235,9 @@ local function addPlayerVisuals(player, character)
 end
 
 local function connectPlayer(player)
-    if player == localPlayer then return end
+    if player == localPlayer then
+        return
+    end
 
     if player.Character then
         addPlayerVisuals(player, player.Character)
@@ -296,12 +267,13 @@ end
 Players.PlayerAdded:Connect(connectPlayer)
 Players.PlayerRemoving:Connect(removePlayer)
 
--- Información del jugador apuntado
+-- Retrato e panel del jugador apuntado
 local thumbnailCache = {}
 
 local function setPortrait(player)
-    if thumbnailCache[player.UserId] then
-        portrait.Image = thumbnailCache[player.UserId]
+    local cached = thumbnailCache[player.UserId]
+    if cached then
+        portrait.Image = cached
         return
     end
 
@@ -323,33 +295,6 @@ local function setPortrait(player)
     end)
 end
 
-local function getNpcTarget(camera)
-    local center = camera.ViewportSize / 2
-    local bestHumanoid
-    local bestScreenDistance = math.huge
-
-    for _, object in ipairs(npcFolder:GetDescendants()) do
-        if object:IsA("Model") then
-            local humanoid = object:FindFirstChildOfClass("Humanoid")
-            local head = object:FindFirstChild("Head")
-
-            if humanoid and humanoid.Health > 0 and head then
-                local point, onScreen = camera:WorldToViewportPoint(head.Position)
-                if onScreen then
-                    local offset = Vector2.new(point.X, point.Y) - center
-                    local screenDistance = offset.Magnitude
-                    if screenDistance < bestScreenDistance then
-                        bestScreenDistance = screenDistance
-                        bestHumanoid = humanoid
-                    end
-                end
-            end
-        end
-    end
-
-    return bestHumanoid
-end
-
 RunService.RenderStepped:Connect(function()
     local camera = Workspace.CurrentCamera
     if not camera then
@@ -357,25 +302,8 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
-    if holdingT and settings.npcCamera then
-        local target = getNpcTarget(camera)
-        if target then
-            if not savedCameraType then
-                savedCameraType = camera.CameraType
-                savedCameraSubject = camera.CameraSubject
-            end
-
-            camera.CameraType = Enum.CameraType.Custom
-            camera.CameraSubject = target
-        end
-    elseif savedCameraType then
-        restoreCamera()
-    end
-
-    local ray = camera:ViewportPointToRay(
-        camera.ViewportSize.X / 2,
-        camera.ViewportSize.Y / 2
-    )
+    local viewport = camera.ViewportSize
+    local ray = camera:ViewportPointToRay(viewport.X / 2, viewport.Y / 2)
 
     local closestPlayer
     local closestCharacter
@@ -396,7 +324,8 @@ RunService.RenderStepped:Connect(function()
                     local closestPoint = ray.Origin + ray.Direction * distance
                     local missDistance = (root.Position - closestPoint).Magnitude
 
-                    if missDistance < 5 and (not closestDistance or distance < closestDistance) then
+                    if missDistance < 5
+                        and (not closestDistance or distance < closestDistance) then
                         closestPlayer = player
                         closestCharacter = character
                         closestHumanoid = humanoid
