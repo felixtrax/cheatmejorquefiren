@@ -5,33 +5,29 @@ local UserInputService = game:GetService("UserInputService")
 
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
+local npcFolder = Workspace:WaitForChild("NPCs")
 
--- Alternar entre primera y tercera persona con I
-local thirdPerson = false
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-
-    if input.KeyCode == Enum.KeyCode.I then
-        thirdPerson = not thirdPerson
-
-        if thirdPerson then
-            localPlayer.CameraMode = Enum.CameraMode.Classic
-            localPlayer.CameraMinZoomDistance = 8
-            localPlayer.CameraMaxZoomDistance = 12
-        else
-            localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
-            localPlayer.CameraMinZoomDistance = 0.5
-            localPlayer.CameraMaxZoomDistance = 0.5
-        end
-    end
-end)
-
--- Fuente para todos los textos.
--- Roblox debe tener disponible la familia "Tiny5 Duo" para mostrarla.
 local TINY5_DUO = Font.new("rbxasset://fonts/families/Tiny5.json")
 
--- Panel del jugador apuntado
+-- Opciones de funciones
+local settings = {
+    panel = true,
+    highlights = true,
+    nameplates = true,
+    npcCamera = true,
+}
+
+local function setEnabled(instance, enabled)
+    if instance then
+        if instance:IsA("Highlight") then
+            instance.Enabled = enabled
+        else
+            instance.Enabled = enabled
+        end
+    end
+end
+
+-- Interfaz
 local gui = Instance.new("ScreenGui")
 gui.Name = "TargetInfoGui"
 gui.ResetOnSpawn = false
@@ -102,37 +98,121 @@ details.TextXAlignment = Enum.TextXAlignment.Left
 details.TextTruncate = Enum.TextTruncate.AtEnd
 details.Parent = panel
 
--- Resaltado persistente en los demás jugadores
-local highlights = {}
+-- Menú de opciones
+local menu = Instance.new("Frame")
+menu.Size = UDim2.fromOffset(220, 190)
+menu.Position = UDim2.new(0, 20, 0.5, -95)
+menu.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+menu.BorderSizePixel = 0
+menu.Visible = false
+menu.Parent = gui
 
-local function addHighlight(player, character)
-    if player == localPlayer or not character then
-        return
+local menuCorner = Instance.new("UICorner")
+menuCorner.CornerRadius = UDim.new(0, 8)
+menuCorner.Parent = menu
+
+local menuTitle = Instance.new("TextLabel")
+menuTitle.Size = UDim2.new(1, 0, 0, 32)
+menuTitle.BackgroundTransparency = 1
+menuTitle.Font = Enum.Font.GothamBold
+menuTitle.Text = "Opciones"
+menuTitle.TextColor3 = Color3.new(1, 1, 1)
+menuTitle.TextSize = 18
+menuTitle.Parent = menu
+
+local function makeToggle(label, key, y)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, -20, 0, 30)
+    button.Position = UDim2.fromOffset(10, y)
+    button.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
+    button.BorderSizePixel = 0
+    button.Font = Enum.Font.Gotham
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.TextSize = 14
+    button.Parent = menu
+
+    local function refresh()
+        button.Text = string.format("%s: %s", label, settings[key] and "ON" or "OFF")
+        button.BackgroundColor3 = settings[key]
+            and Color3.fromRGB(30, 120, 65)
+            or Color3.fromRGB(100, 45, 45)
     end
 
-    local highlight = highlights[player]
-    if not highlight then
-        highlight = Instance.new("Highlight")
-        highlight.Name = "RedWhiteHighlight"
-        highlight.FillColor = Color3.fromRGB(255, 0, 0)
-        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-        highlight.FillTransparency = 0.25
-        highlight.OutlineTransparency = 0
-        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        highlight.Parent = gui
-        highlights[player] = highlight
-    end
+    button.Activated:Connect(function()
+        settings[key] = not settings[key]
+        refresh()
+    end)
 
-    highlight.Adornee = character
-    highlight.Enabled = true
+    refresh()
 end
 
--- Etiqueta con nombre blanco y salud verde sobre cada jugador
+makeToggle("Panel", "panel", 40)
+makeToggle("Resaltados", "highlights", 75)
+makeToggle("Etiquetas", "nameplates", 110)
+makeToggle("Cámara NPC (T)", "npcCamera", 145)
+
+-- Teclas M para mostrar/ocultar menú, T para activar seguimiento mientras se mantiene
+local holdingT = false
+local savedCameraType
+local savedCameraSubject
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.KeyCode == Enum.KeyCode.M then
+        menu.Visible = not menu.Visible
+    elseif input.KeyCode == Enum.KeyCode.T and settings.npcCamera then
+        holdingT = true
+    end
+end)
+
+local function restoreCamera()
+    local camera = Workspace.CurrentCamera
+    if camera and savedCameraType then
+        camera.CameraType = savedCameraType
+        camera.CameraSubject = savedCameraSubject
+    end
+
+    savedCameraType = nil
+    savedCameraSubject = nil
+end
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.T then
+        holdingT = false
+        restoreCamera()
+    end
+end)
+
+local function create(className, properties, parent)
+    local object = Instance.new(className)
+    for property, value in pairs(properties) do
+        object[property] = value
+    end
+    object.Parent = parent
+    return object
+end
+
+-- Resaltados y etiquetas de jugadores
+local highlights = {}
 local nameplates = {}
 
-local function addNameplate(player, character)
-    if player == localPlayer or not character then
-        return
+local function addPlayerVisuals(player, character)
+    if player == localPlayer or not character then return end
+
+    if not highlights[player] then
+        highlights[player] = create("Highlight", {
+            Name = "RedWhiteHighlight",
+            FillColor = Color3.fromRGB(255, 0, 0),
+            OutlineColor = Color3.new(1, 1, 1),
+            FillTransparency = 0.25,
+            OutlineTransparency = 0,
+            DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
+            Enabled = settings.highlights,
+            Adornee = character,
+        }, gui)
+    else
+        highlights[player].Adornee = character
     end
 
     local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -140,88 +220,71 @@ local function addNameplate(player, character)
     local head = character:FindFirstChild("Head")
         or character:WaitForChild("Head", 5)
 
-    if not humanoid or not head then
-        return
+    if not humanoid or not head then return end
+
+    if nameplates[player] then
+        nameplates[player]:Destroy()
     end
 
-    local previous = nameplates[player]
-    if previous then
-        previous:Destroy()
-    end
+    local billboard = create("BillboardGui", {
+        Name = "PlayerNameplate",
+        Adornee = head,
+        Size = UDim2.fromOffset(200, 42),
+        StudsOffset = Vector3.new(0, 2.5, 0),
+        AlwaysOnTop = true,
+        Enabled = settings.nameplates,
+    }, gui)
 
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "PlayerNameplate"
-    billboard.Adornee = head
-    billboard.Size = UDim2.fromOffset(200, 42)
-    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-    billboard.AlwaysOnTop = true
-    billboard.Parent = gui
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0.5, 0),
+        BackgroundTransparency = 1,
+        FontFace = TINY5_DUO,
+        TextSize = 16,
+        TextColor3 = Color3.new(1, 1, 1),
+        TextStrokeColor3 = Color3.fromRGB(20, 20, 20),
+        TextStrokeTransparency = 0.25,
+        Text = player.DisplayName,
+    }, billboard)
 
-    local nameText = Instance.new("TextLabel")
-    nameText.Position = UDim2.fromScale(0, 0)
-    nameText.Size = UDim2.new(1, 0, 0.5, 0)
-    nameText.BackgroundTransparency = 1
-    nameText.FontFace = TINY5_DUO
-    nameText.TextSize = 16
-    nameText.TextColor3 = Color3.fromRGB(255, 255, 255)
-    nameText.TextStrokeColor3 = Color3.fromRGB(20, 20, 20)
-    nameText.TextStrokeTransparency = 0.25
-    nameText.Text = player.DisplayName
-    nameText.Parent = billboard
-
-    local healthTextOnPlayer = Instance.new("TextLabel")
-    healthTextOnPlayer.Position = UDim2.new(0, 0, 0.5, 0)
-    healthTextOnPlayer.Size = UDim2.new(1, 0, 0.5, 0)
-    healthTextOnPlayer.BackgroundTransparency = 1
-    healthTextOnPlayer.FontFace = TINY5_DUO
-    healthTextOnPlayer.TextSize = 15
-    healthTextOnPlayer.TextColor3 = Color3.fromRGB(0, 255, 70)
-    healthTextOnPlayer.TextStrokeColor3 = Color3.fromRGB(20, 20, 20)
-    healthTextOnPlayer.TextStrokeTransparency = 0.25
-    healthTextOnPlayer.Text = string.format("%d HP", math.ceil(humanoid.Health))
-    healthTextOnPlayer.Parent = billboard
-
-    nameplates[player] = billboard
+    local hpLabel = create("TextLabel", {
+        Position = UDim2.new(0, 0, 0.5, 0),
+        Size = UDim2.new(1, 0, 0.5, 0),
+        BackgroundTransparency = 1,
+        FontFace = TINY5_DUO,
+        TextSize = 15,
+        TextColor3 = Color3.fromRGB(0, 255, 70),
+        TextStrokeColor3 = Color3.fromRGB(20, 20, 20),
+        TextStrokeTransparency = 0.25,
+        Text = string.format("%d HP", math.ceil(humanoid.Health)),
+    }, billboard)
 
     humanoid.HealthChanged:Connect(function(health)
-        if healthTextOnPlayer.Parent then
-            healthTextOnPlayer.Text = string.format("%d HP", math.ceil(health))
-        end
-    end)
-
-    player:GetPropertyChangedSignal("DisplayName"):Connect(function()
-        if nameText.Parent then
-            nameText.Text = player.DisplayName
+        if hpLabel.Parent then
+            hpLabel.Text = string.format("%d HP", math.ceil(health))
         end
     end)
 end
 
 local function connectPlayer(player)
-    if player == localPlayer then
-        return
-    end
+    if player == localPlayer then return end
 
     if player.Character then
-        addHighlight(player, player.Character)
-        addNameplate(player, player.Character)
+        addPlayerVisuals(player, player.Character)
     end
 
     player.CharacterAdded:Connect(function(character)
-        addHighlight(player, character)
-        addNameplate(player, character)
+        addPlayerVisuals(player, character)
     end)
 end
 
 local function removePlayer(player)
-    local highlight = highlights[player]
-    if highlight then
-        highlight:Destroy()
+    if highlights[player] then
+        highlights[player]:Destroy()
         highlights[player] = nil
     end
 
-    local nameplate = nameplates[player]
-    if nameplate then
-        nameplate:Destroy()
+    if nameplates[player] then
+        nameplates[player]:Destroy()
         nameplates[player] = nil
     end
 end
@@ -233,13 +296,12 @@ end
 Players.PlayerAdded:Connect(connectPlayer)
 Players.PlayerRemoving:Connect(removePlayer)
 
--- Panel del jugador apuntado desde el centro de la cámara
+-- Información del jugador apuntado
 local thumbnailCache = {}
 
 local function setPortrait(player)
-    local cached = thumbnailCache[player.UserId]
-    if cached then
-        portrait.Image = cached
+    if thumbnailCache[player.UserId] then
+        portrait.Image = thumbnailCache[player.UserId]
         return
     end
 
@@ -261,6 +323,33 @@ local function setPortrait(player)
     end)
 end
 
+local function getNpcTarget(camera)
+    local center = camera.ViewportSize / 2
+    local bestHumanoid
+    local bestScreenDistance = math.huge
+
+    for _, object in ipairs(npcFolder:GetDescendants()) do
+        if object:IsA("Model") then
+            local humanoid = object:FindFirstChildOfClass("Humanoid")
+            local head = object:FindFirstChild("Head")
+
+            if humanoid and humanoid.Health > 0 and head then
+                local point, onScreen = camera:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    local offset = Vector2.new(point.X, point.Y) - center
+                    local screenDistance = offset.Magnitude
+                    if screenDistance < bestScreenDistance then
+                        bestScreenDistance = screenDistance
+                        bestHumanoid = humanoid
+                    end
+                end
+            end
+        end
+    end
+
+    return bestHumanoid
+end
+
 RunService.RenderStepped:Connect(function()
     local camera = Workspace.CurrentCamera
     if not camera then
@@ -268,8 +357,25 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
-    local viewport = camera.ViewportSize
-    local ray = camera:ViewportPointToRay(viewport.X / 2, viewport.Y / 2)
+    if holdingT and settings.npcCamera then
+        local target = getNpcTarget(camera)
+        if target then
+            if not savedCameraType then
+                savedCameraType = camera.CameraType
+                savedCameraSubject = camera.CameraSubject
+            end
+
+            camera.CameraType = Enum.CameraType.Custom
+            camera.CameraSubject = target
+        end
+    elseif savedCameraType then
+        restoreCamera()
+    end
+
+    local ray = camera:ViewportPointToRay(
+        camera.ViewportSize.X / 2,
+        camera.ViewportSize.Y / 2
+    )
 
     local closestPlayer
     local closestCharacter
@@ -280,59 +386,63 @@ RunService.RenderStepped:Connect(function()
         if player ~= localPlayer then
             local character = player.Character
             local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-            local targetRoot = character and character:FindFirstChild("HumanoidRootPart")
+            local root = character and character:FindFirstChild("HumanoidRootPart")
 
-            if humanoid and targetRoot and humanoid.Health > 0 then
-                local offset = targetRoot.Position - ray.Origin
+            if humanoid and humanoid.Health > 0 and root then
+                local offset = root.Position - ray.Origin
                 local distance = offset.Magnitude
 
-                if distance >= 1 then
-                    local dot = ray.Direction:Dot(offset.Unit)
+                if distance >= 1 and ray.Direction:Dot(offset.Unit) > 0.995 then
+                    local closestPoint = ray.Origin + ray.Direction * distance
+                    local missDistance = (root.Position - closestPoint).Magnitude
 
-                    if dot > 0.995 then
-                        local closestPoint = ray.Origin + ray.Direction * distance
-                        local missDistance = (targetRoot.Position - closestPoint).Magnitude
-
-                        if missDistance < 5
-                            and (not closestDistance or distance < closestDistance) then
-                            closestPlayer = player
-                            closestCharacter = character
-                            closestHumanoid = humanoid
-                            closestDistance = distance
-                        end
+                    if missDistance < 5 and (not closestDistance or distance < closestDistance) then
+                        closestPlayer = player
+                        closestCharacter = character
+                        closestHumanoid = humanoid
+                        closestDistance = distance
                     end
                 end
             end
         end
     end
 
-    if not closestPlayer then
+    if settings.panel and closestPlayer then
+        local myRoot = localPlayer.Character
+            and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local targetRoot = closestCharacter:FindFirstChild("HumanoidRootPart")
+        local distance = closestDistance
+
+        if myRoot and targetRoot then
+            distance = (myRoot.Position - targetRoot.Position).Magnitude
+        end
+
+        local health = math.max(0, math.floor(closestHumanoid.Health + 0.5))
+        local maxHealth = math.max(1, math.floor(closestHumanoid.MaxHealth + 0.5))
+
+        nameLabel.Text = closestPlayer.DisplayName
+        healthText.Text = string.format("%d/%d", health, maxHealth)
+        healthFill.Size = UDim2.fromScale(
+            math.clamp(closestHumanoid.Health / maxHealth, 0, 1),
+            1
+        )
+        details.Text = string.format(
+            "dist: %dm   cuenta: %d días",
+            math.floor(distance + 0.5),
+            closestPlayer.AccountAge
+        )
+
+        setPortrait(closestPlayer)
+        panel.Visible = true
+    else
         panel.Visible = false
-        return
     end
 
-    local myRoot = localPlayer.Character
-        and localPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local targetRoot = closestCharacter:FindFirstChild("HumanoidRootPart")
-    local distance = closestDistance
-
-    if myRoot and targetRoot then
-        distance = (myRoot.Position - targetRoot.Position).Magnitude
+    for player, highlight in pairs(highlights) do
+        highlight.Enabled = settings.highlights and player.Parent == Players
     end
 
-    local health = math.max(0, math.floor(closestHumanoid.Health + 0.5))
-    local maxHealth = math.max(1, math.floor(closestHumanoid.MaxHealth + 0.5))
-    local ratio = math.clamp(closestHumanoid.Health / maxHealth, 0, 1)
-
-    nameLabel.Text = closestPlayer.DisplayName
-    healthText.Text = string.format("%d/%d", health, maxHealth)
-    healthFill.Size = UDim2.fromScale(ratio, 1)
-    details.Text = string.format(
-        "dist: %dm   cuenta: %d días",
-        math.floor(distance + 0.5),
-        closestPlayer.AccountAge
-    )
-
-    setPortrait(closestPlayer)
-    panel.Visible = true
+    for player, nameplate in pairs(nameplates) do
+        nameplate.Enabled = settings.nameplates and player.Parent == Players
+    end
 end)
